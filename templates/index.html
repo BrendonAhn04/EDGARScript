@@ -203,6 +203,7 @@
         </div>
 
         <div id="loading">Searching...</div>
+        <button id="exportCsvBtn" class="btn btn-secondary" style="display: none; margin-bottom: 1rem;">Export to CSV</button>
         <div id="results-container"></div>
     </div>
 
@@ -220,6 +221,8 @@
             const loadingDiv = document.getElementById('loading');
             const resultsContainer = document.getElementById('results-container');
             const searchBtn = document.getElementById('search-btn');
+            const exportBtn = document.getElementById('exportCsvBtn');
+            let currentSearchResults = [];
 
             addDataPointBtn.addEventListener('click', () => {
                 const row = document.createElement('div');
@@ -243,6 +246,7 @@
                 resultsContainer.innerHTML = '';
                 searchBtn.disabled = true;
                 searchBtn.textContent = 'Searching...';
+                exportBtn.style.display = 'none';
 
                 const formData = new FormData(form);
                 const payload = {
@@ -268,7 +272,11 @@
                     }
 
                     const data = await response.json();
-                    renderResults(data.results);
+                    currentSearchResults = data.results;
+                    renderResults(currentSearchResults);
+                    if (currentSearchResults && currentSearchResults.length > 0) {
+                        exportBtn.style.display = 'inline-block';
+                    }
 
                 } catch (error) {
                     resultsContainer.innerHTML = `<div class="result-card not-found-msg"><strong>Error:</strong> ${error.message}</div>`;
@@ -277,6 +285,10 @@
                     searchBtn.disabled = false;
                     searchBtn.textContent = 'Find Filing';
                 }
+            });
+
+            exportBtn.addEventListener('click', () => {
+                exportToCSV(currentSearchResults);
             });
 
             function renderResults(results) {
@@ -316,6 +328,59 @@
                     `;
                     resultsContainer.innerHTML += cardHtml;
                 });
+            }
+
+            function exportToCSV(results) {
+                if (!results || results.length === 0) {
+                    alert("No data to export!");
+                    return;
+                }
+
+                let dataHeaders = new Set();
+                results.forEach(company => {
+                    if (company.filings) {
+                        company.filings.forEach(filing => {
+                            if (filing.data) {
+                                Object.keys(filing.data).forEach(key => dataHeaders.add(key));
+                            }
+                        });
+                    }
+                });
+                
+                const dataHeadersArray = Array.from(dataHeaders);
+                const csvRows = [];
+                const headers = ['Company', 'Filing Date', 'Target Dates', 'Pre-XBRL', 'URL', ...dataHeadersArray];
+                csvRows.push(headers.map(h => `"${h}"`).join(','));
+
+                results.forEach(company => {
+                    const companyName = `"${company.displayName.replace(/"/g, '""')}"`;
+                    if (company.filings) {
+                        company.filings.forEach(filing => {
+                            const row = [
+                                companyName,
+                                `"${filing.filingDate || 'N/A'}"`,
+                                `"${(filing.targetDates || []).join('; ')}"`,
+                                `"${filing.is_pre_xbrl ? 'Yes' : 'No'}"`,
+                                `"${filing.url || ''}"`
+                            ];
+                            dataHeadersArray.forEach(header => {
+                                let val = filing.data && filing.data[header] ? filing.data[header] : 'N/A';
+                                row.push(`"${String(val).replace(/"/g, '""')}"`);
+                            });
+                            csvRows.push(row.join(','));
+                        });
+                    }
+                });
+
+                const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.setAttribute('hidden', '');
+                a.setAttribute('href', url);
+                a.setAttribute('download', 'sec_filings_data.csv');
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
             }
         });
     </script>

@@ -29,7 +29,7 @@ COMMON_FINANCIALS = {
     "Operating Income": ["OperatingIncomeLoss"]
 }
 
-def get_xbrl_data(cik, accession_number, data_points, headers, report_date=None):
+def get_xbrl_data(cik, accession_number, data_points, headers, report_date=None, is_pre_xbrl=False, missing_pre_2010="Manual Review (Pre-XBRL)", missing_post_2010="Data not found in XBRL"):
     try:
         cik_str = str(cik).zfill(10)
         if cik_str in API_CACHE["companyfacts"]:
@@ -47,7 +47,7 @@ def get_xbrl_data(cik, accession_number, data_points, headers, report_date=None)
         results = {}
 
         for label in data_points:
-            default_na = "N/A (If pre-2010, data may be in filing text)"
+            default_na = missing_pre_2010 if is_pre_xbrl else missing_post_2010
             found_val = default_na
             possible_tags = COMMON_FINANCIALS.get(label, [])
             
@@ -237,11 +237,16 @@ def find_10k_link(ticker_or_name, target_date_str, search_previous=False, data_p
                 f_date_formatted = datetime.strptime(f_date_str, "%Y-%m-%d").strftime(date_format)
                 message = f"Found 10-K filed on {f_date_formatted}"
                 data_results = {}
+                
+                is_pre_xbrl = int(f_date_str[:4]) < 2010
 
                 if data_points:
-                    data_results = get_xbrl_data(cik, acc, data_points, headers, report_date)
+                    data_results = get_xbrl_data(cik, acc, data_points, headers, report_date, is_pre_xbrl)
                     
-                return {"message": message, "url": url, "data": data_results, "filingDate": f_date_str}
+                result_dict = {"message": message, "url": url, "data": data_results, "filingDate": f_date_str}
+                if is_pre_xbrl:
+                    result_dict['is_pre_xbrl'] = True
+                return result_dict
             else:
                 direction = "on or before" if search_previous else "on or after"
                 return {"message": f"No 10-K filing found {direction} {target_date_str}."}
@@ -347,6 +352,8 @@ def api_search():
                         'filingDate': result.get('filingDate'),
                         'url': url
                     }
+                    if 'is_pre_xbrl' in result:
+                        seen_urls[url]['is_pre_xbrl'] = result['is_pre_xbrl']
             else:
                 # No filing found for this date, or an error occurred
                 company_card["notFound"].append({
@@ -368,4 +375,5 @@ if __name__ == "__main__":
     # 3. Inside 'templates', create a file named 'index.html' and paste the HTML content.
     # 4. Run this Python script. It will start a web server.
     # 5. Open your web browser and go to http://127.0.0.1:5000
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
