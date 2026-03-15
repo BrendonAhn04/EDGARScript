@@ -228,118 +228,118 @@ def find_10k_link(ticker_or_name, target_date_str, search_previous=False, data_p
     except Exception as e:
         return {"message": f"An error occurred: {e}"}
 
-if __name__ == "__main__":
-    # --- Flask Web App ---
-    app = Flask(__name__, template_folder='templates')
+# --- Flask Web App ---
+app = Flask(__name__, template_folder='templates')
 
-    @app.route('/')
-    def index():
-        # Pass financial options to the template for the datalist
-        return render_template('index.html', financial_options=list(COMMON_FINANCIALS.keys()))
+@app.route('/')
+def index():
+    # Pass financial options to the template for the datalist
+    return render_template('index.html', financial_options=list(COMMON_FINANCIALS.keys()))
 
-    @app.route('/api/search', methods=['POST'])
-    def api_search():
-        data = request.json
-        tickers_input = data.get('tickers', '').strip()
-        date_inputs = data.get('dates', '').strip()
-        search_prev = data.get('searchPrevious', False)
-        selected_data = data.get('dataPoints', [])
-        
-        format_mapping = {
-            "MM/DD/YYYY": "%m/%d/%Y",
-            "YYYY-MM-DD": "%Y-%m-%d",
-            "DD/MM/YYYY": "%d/%m/%Y",
-            "MM-DD-YYYY": "%m-%d-%Y"
-        }
-        date_format_str = format_mapping.get(data.get('dateFormat', 'MM/DD/YYYY'), "%m/%d/%Y")
+@app.route('/api/search', methods=['POST'])
+def api_search():
+    data = request.json
+    tickers_input = data.get('tickers', '').strip()
+    date_inputs = data.get('dates', '').strip()
+    search_prev = data.get('searchPrevious', False)
+    selected_data = data.get('dataPoints', [])
+    
+    format_mapping = {
+        "MM/DD/YYYY": "%m/%d/%Y",
+        "YYYY-MM-DD": "%Y-%m-%d",
+        "DD/MM/YYYY": "%d/%m/%Y",
+        "MM-DD-YYYY": "%m-%d-%Y"
+    }
+    date_format_str = format_mapping.get(data.get('dateFormat', 'MM/DD/YYYY'), "%m/%d/%Y")
 
-        if not tickers_input or not date_inputs:
-            return jsonify({"error": "Tickers and dates are required."}), 400
+    if not tickers_input or not date_inputs:
+        return jsonify({"error": "Tickers and dates are required."}), 400
 
-        raw_tickers = [t.strip().upper() for t in tickers_input.split(',') if t.strip()]
-        raw_dates = list(dict.fromkeys(d.strip() for d in date_inputs.split(',') if d.strip()))
+    raw_tickers = [t.strip().upper() for t in tickers_input.split(',') if t.strip()]
+    raw_dates = list(dict.fromkeys(d.strip() for d in date_inputs.split(',') if d.strip()))
 
+    try:
+        # Sort dates from most recent to oldest for processing
+        dates = sorted(raw_dates, key=lambda x: datetime.strptime(x, date_format_str), reverse=True)
+    except ValueError:
+        return jsonify({"error": f"Invalid date found for the format '{data.get('dateFormat')}'."}), 400
+
+    # Pre-resolve tickers/names to avoid duplicate searches (e.g., Apple and AAPL)
+    headers = {"User-Agent": SEC_USER_AGENT}
+    if API_CACHE["tickers"] is None:
         try:
-            # Sort dates from most recent to oldest for processing
-            dates = sorted(raw_dates, key=lambda x: datetime.strptime(x, date_format_str), reverse=True)
-        except ValueError:
-            return jsonify({"error": f"Invalid date found for the format '{data.get('dateFormat')}'."}), 400
+            API_CACHE["tickers"] = requests.get("https://www.sec.gov/files/company_tickers.json", headers=headers).json()
+        except Exception as e:
+             return jsonify({"error": f"Could not fetch company list from SEC: {e}"}), 500
+    tickers_json = API_CACHE["tickers"]
 
-        # Pre-resolve tickers/names to avoid duplicate searches (e.g., Apple and AAPL)
-        headers = {"User-Agent": SEC_USER_AGENT}
-        if API_CACHE["tickers"] is None:
-            try:
-                API_CACHE["tickers"] = requests.get("https://www.sec.gov/files/company_tickers.json", headers=headers).json()
-            except Exception as e:
-                 return jsonify({"error": f"Could not fetch company list from SEC: {e}"}), 500
-        tickers_json = API_CACHE["tickers"]
-
-        unique_companies = {}  # CIK -> (Display Name, Search Query)
-        for t in raw_tickers:
-            found_data = None
-            # Try exact ticker match first
+    unique_companies = {}  # CIK -> (Display Name, Search Query)
+    for t in raw_tickers:
+        found_data = None
+        # Try exact ticker match first
+        for item in tickers_json.values():
+            if item['ticker'] == t:
+                found_data = item
+                break
+        # If not found, try partial company name match
+        if not found_data:
             for item in tickers_json.values():
-                if item['ticker'] == t:
+                if t in item['title'].upper():
                     found_data = item
                     break
-            # If not found, try partial company name match
-            if not found_data:
-                for item in tickers_json.values():
-                    if t in item['title'].upper():
-                        found_data = item
-                        break
-            
-            if found_data:
-                cik = found_data['cik_str']
-                if cik not in unique_companies:
-                    unique_companies[cik] = (f"{found_data['title']} ({found_data['ticker']})", found_data['ticker'])
-            else:
-                # Use the raw query if no match is found
-                if t not in unique_companies:
-                    unique_companies[t] = (t, t)
+        
+        if found_data:
+            cik = found_data['cik_str']
+            if cik not in unique_companies:
+                unique_companies[cik] = (f"{found_data['title']} ({found_data['ticker']})", found_data['ticker'])
+        else:
+            # Use the raw query if no match is found
+            if t not in unique_companies:
+                unique_companies[t] = (t, t)
 
-        all_results = []
-        queries_to_run = list(unique_companies.values())
+    all_results = []
+    queries_to_run = list(unique_companies.values())
 
-        for display_name, search_query in queries_to_run:
-            company_card = {
-                "displayName": display_name,
-                "filings": [],
-                "notFound": []
-            }
-            seen_urls = {}
+    for display_name, search_query in queries_to_run:
+        company_card = {
+            "displayName": display_name,
+            "filings": [],
+            "notFound": []
+        }
+        seen_urls = {}
+        
+        for date_val in dates:
+            result = find_10k_link(search_query, date_val, search_prev, selected_data, date_format_str)
             
-            for date_val in dates:
-                result = find_10k_link(search_query, date_val, search_prev, selected_data, date_format_str)
-                
-                url = result.get("url")
-                if url:
-                    if url in seen_urls:
-                        # Add this target date to an existing filing result
-                        seen_urls[url]['targetDates'].append(date_val)
-                    else:
-                        # This is a new filing, store it
-                        seen_urls[url] = {
-                            'targetDates': [date_val],
-                            'message': result['message'],
-                            'data': result.get('data', {}),
-                            'filingDate': result.get('filingDate'),
-                            'url': url
-                        }
+            url = result.get("url")
+            if url:
+                if url in seen_urls:
+                    # Add this target date to an existing filing result
+                    seen_urls[url]['targetDates'].append(date_val)
                 else:
-                    # No filing found for this date, or an error occurred
-                    company_card["notFound"].append({
-                        "targetDate": date_val,
-                        "message": result.get("message", "An unknown error occurred.")
-                    })
+                    # This is a new filing, store it
+                    seen_urls[url] = {
+                        'targetDates': [date_val],
+                        'message': result['message'],
+                        'data': result.get('data', {}),
+                        'filingDate': result.get('filingDate'),
+                        'url': url
+                    }
+            else:
+                # No filing found for this date, or an error occurred
+                company_card["notFound"].append({
+                    "targetDate": date_val,
+                    "message": result.get("message", "An unknown error occurred.")
+                })
 
-            # Sort the unique filings found for this company by filing date (most recent to oldest)
-            sorted_filings = sorted(seen_urls.values(), key=lambda item: item.get('filingDate', ''), reverse=True)
-            company_card["filings"] = sorted_filings
-            all_results.append(company_card)
+        # Sort the unique filings found for this company by filing date (most recent to oldest)
+        sorted_filings = sorted(seen_urls.values(), key=lambda item: item.get('filingDate', ''), reverse=True)
+        company_card["filings"] = sorted_filings
+        all_results.append(company_card)
 
-        return jsonify({"results": all_results})
+    return jsonify({"results": all_results})
 
+if __name__ == "__main__":
     # To run the app:
     # 1. Make sure you have Flask installed: pip install Flask
     # 2. Create a folder named 'templates' in the same directory as this script.
