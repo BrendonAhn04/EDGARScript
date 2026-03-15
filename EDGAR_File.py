@@ -19,12 +19,12 @@ API_CACHE = {
 
 COMMON_FINANCIALS = {
     "Net Income": ["NetIncomeLoss", "ProfitLoss", "NetIncomeLossAvailableToCommonStockholdersBasic"],
-    "Revenues": ["Revenues", "SalesRevenueNet", "RevenueFromContractWithCustomerExcludingAssessedTax"],
+    "Revenues": ["Revenues", "SalesRevenueNet", "RevenueFromContractWithCustomerExcludingAssessedTax", "RevenuesNetOfInterestExpense"],
     "Total Assets": ["Assets"],
     "Total Liabilities": ["Liabilities"],
     "Stockholders Equity": ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
     "Earnings Per Share (Basic)": ["EarningsPerShareBasic"],
-    "Cash & Equivalents": ["CashAndCashEquivalentsAtCarryingValue"],
+    "Cash & Equivalents": ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
     "Gross Profit": ["GrossProfit"],
     "Operating Income": ["OperatingIncomeLoss"]
 }
@@ -47,7 +47,8 @@ def get_xbrl_data(cik, accession_number, data_points, headers, report_date=None)
         results = {}
 
         for label in data_points:
-            found_val = "N/A (If pre-2010, data may be in filing text)"
+            default_na = "N/A (If pre-2010, data may be in filing text)"
+            found_val = default_na
             possible_tags = COMMON_FINANCIALS.get(label, [])
             
             for tag in possible_tags:
@@ -62,7 +63,26 @@ def get_xbrl_data(cik, accession_number, data_points, headers, report_date=None)
                         match = None
                         if filing_data:
                             if report_date:
-                                match = next((item for item in filing_data if item.get('end') == report_date), None)
+                                date_matches = [item for item in filing_data if item.get('end') == report_date]
+                                # Prefer annual data for duration metrics. Instant metrics (no 'start') are valid as-is.
+                                for m in date_matches:
+                                    if 'start' not in m:
+                                        match = m
+                                        break
+                                    elif m.get('fp') == 'FY':
+                                        match = m
+                                        break
+                                    elif 'start' in m and 'end' in m:
+                                        try:
+                                            start_d = datetime.strptime(m['start'], "%Y-%m-%d")
+                                            end_d = datetime.strptime(m['end'], "%Y-%m-%d")
+                                            if (end_d - start_d).days > 360:
+                                                match = m
+                                                break
+                                        except:
+                                            pass
+                                if not match and date_matches:
+                                    match = date_matches[0]
                             if not match:
                                 # Fallback: use the data with the latest end date in this filing
                                 filing_data.sort(key=lambda x: x.get('end', ''), reverse=True)
@@ -75,24 +95,26 @@ def get_xbrl_data(cik, accession_number, data_points, headers, report_date=None)
                                 item for item in data_list 
                                 if item.get('end') == report_date
                             ]
-                            # Filter for Annual data (FY tag OR duration > 360 days)
-                            fy_matches = []
+                            # Filter for Annual data (FY tag OR duration > 360 days) OR Instant metrics
+                            valid_matches = []
                             for m in matches:
-                                if m.get('fp') == 'FY':
-                                    fy_matches.append(m)
+                                if 'start' not in m:
+                                    valid_matches.append(m)
+                                elif m.get('fp') == 'FY':
+                                    valid_matches.append(m)
                                 elif 'start' in m and 'end' in m:
                                     try:
                                         start_d = datetime.strptime(m['start'], "%Y-%m-%d")
                                         end_d = datetime.strptime(m['end'], "%Y-%m-%d")
                                         if (end_d - start_d).days > 360:
-                                            fy_matches.append(m)
+                                            valid_matches.append(m)
                                     except:
                                         pass
 
-                            if fy_matches:
-                                # Sort by filing date descending to get the most recent (likely most accurate/restated) value
-                                fy_matches.sort(key=lambda x: x.get('filed', ''), reverse=True)
-                                match = fy_matches[0]
+                            if valid_matches:
+                                # Sort by filing date descending to get the most recent restated value
+                                valid_matches.sort(key=lambda x: x.get('filed', ''), reverse=True)
+                                match = valid_matches[0]
 
                         if match:
                             val = match['val']
@@ -105,7 +127,7 @@ def get_xbrl_data(cik, accession_number, data_points, headers, report_date=None)
                                 val_str = f"${val:,.2f}"
                             found_val = val_str
                             break
-                if found_val != "N/A":
+                if found_val != default_na:
                     break
             results[label] = found_val
         
