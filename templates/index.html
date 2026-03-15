@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEC EDGAR 10-K Link Finder</title>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --card-bg: #ffffff;
+            --header-color: #2c3e50;
+            --subheader-color: #34495e;
+            --border-color: #dee2e6;
+            --link-color: #0066cc;
+            --success-color: green;
+            --error-color: #e74c3c;
+            --button-bg: #007bff;
+            --button-hover-bg: #0056b3;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            background-color: var(--bg-color);
+            color: var(--subheader-color);
+        }
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 2rem;
+        }
+        header h1 {
+            color: var(--header-color);
+            font-size: 2rem;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .form-card {
+            background-color: var(--card-bg);
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .form-group label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 1rem;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .checkbox-group input {
+            width: auto;
+        }
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            font-weight: bold;
+            color: #fff;
+            background-color: var(--button-bg);
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn:hover {
+            background-color: var(--button-hover-bg);
+        }
+        .btn-secondary {
+            background-color: #6c757d;
+        }
+        .btn-secondary:hover {
+            background-color: #5a6268;
+        }
+        .btn-danger {
+            background-color: #dc3545;
+            padding: 0.2rem 0.6rem;
+            font-size: 0.9rem;
+        }
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        #search-btn {
+            width: 100%;
+        }
+        .data-point-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .data-point-row input {
+            flex-grow: 1;
+        }
+        #loading {
+            text-align: center;
+            padding: 2rem;
+            font-size: 1.2rem;
+            display: none;
+        }
+        .result-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }
+        .result-card-header {
+            background-color: #f8f9fa;
+            padding: 1rem 1.5rem;
+            font-size: 1.25rem;
+            font-weight: bold;
+            color: var(--header-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .filing-item {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .filing-item:last-child {
+            border-bottom: none;
+        }
+        .filing-item p { margin: 0.25rem 0; }
+        .filing-item a {
+            color: var(--link-color);
+            text-decoration: none;
+            word-break: break-all;
+        }
+        .filing-item a:hover { text-decoration: underline; }
+        .data-results {
+            margin-top: 0.75rem;
+            padding-left: 1rem;
+            font-size: 0.9rem;
+        }
+        .data-results p {
+            margin: 0.2rem 0;
+        }
+        .data-results .key { font-weight: bold; }
+        .data-results .val-ok { color: var(--success-color); }
+        .data-results .val-err { color: var(--error-color); }
+        .not-found-msg {
+            padding: 0.5rem 1.5rem;
+            color: var(--error-color);
+            background-color: #fbeae9;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>SEC EDGAR 10-K Finder</h1>
+        </header>
+
+        <div class="form-card">
+            <form id="search-form">
+                <div class="form-group">
+                    <label for="tickers">Stock Tickers/Names (comma-separated)</label>
+                    <input type="text" id="tickers" name="tickers" placeholder="e.g., AAPL, MSFT, GOOG" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="date-format">Date Format</label>
+                    <select id="date-format" name="dateFormat">
+                        <option>MM/DD/YYYY</option>
+                        <option>YYYY-MM-DD</option>
+                        <option>DD/MM/YYYY</option>
+                        <option>MM-DD-YYYY</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="dates">Target Dates (comma-separated)</label>
+                    <input type="text" id="dates" name="dates" placeholder="e.g., 12/31/2022, 12/31/2021" required>
+                </div>
+
+                <div class="form-group checkbox-group" title="Checked: Search for filings ON or BEFORE the target date. Unchecked: Search for filings ON or AFTER the target date.">
+                    <input type="checkbox" id="search-previous" name="searchPrevious">
+                    <label for="search-previous">Search for previous filing (before date)</label>
+                </div>
+
+                <div class="form-group">
+                    <label>Financial Data (Optional)</label>
+                    <div id="data-points-container"></div>
+                    <button type="button" id="add-data-point" class="btn btn-secondary">+ Add Data Point</button>
+                </div>
+
+                <button type="submit" id="search-btn" class="btn">Find Filing</button>
+            </form>
+        </div>
+
+        <div id="loading">Searching...</div>
+        <div id="results-container"></div>
+    </div>
+
+    <datalist id="financial-options">
+        {% for option in financial_options %}
+        <option value="{{ option }}"></option>
+        {% endfor %}
+    </datalist>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const form = document.getElementById('search-form');
+            const addDataPointBtn = document.getElementById('add-data-point');
+            const dataPointsContainer = document.getElementById('data-points-container');
+            const loadingDiv = document.getElementById('loading');
+            const resultsContainer = document.getElementById('results-container');
+            const searchBtn = document.getElementById('search-btn');
+
+            addDataPointBtn.addEventListener('click', () => {
+                const row = document.createElement('div');
+                row.className = 'data-point-row';
+                row.innerHTML = `
+                    <input type="text" list="financial-options" class="data-point-input" placeholder="e.g., Net Income">
+                    <button type="button" class="btn btn-danger remove-row-btn">✕</button>
+                `;
+                dataPointsContainer.appendChild(row);
+            });
+
+            dataPointsContainer.addEventListener('click', (e) => {
+                if (e.target.classList.contains('remove-row-btn')) {
+                    e.target.parentElement.remove();
+                }
+            });
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                loadingDiv.style.display = 'block';
+                resultsContainer.innerHTML = '';
+                searchBtn.disabled = true;
+                searchBtn.textContent = 'Searching...';
+
+                const formData = new FormData(form);
+                const payload = {
+                    tickers: formData.get('tickers'),
+                    dates: formData.get('dates'),
+                    dateFormat: formData.get('dateFormat'),
+                    searchPrevious: formData.has('searchPrevious'),
+                    dataPoints: Array.from(document.querySelectorAll('.data-point-input'))
+                                    .map(input => input.value.trim())
+                                    .filter(val => val)
+                };
+
+                try {
+                    const response = await fetch('/api/search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        const errData = await response.json();
+                        throw new Error(errData.error || `HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    renderResults(data.results);
+
+                } catch (error) {
+                    resultsContainer.innerHTML = `<div class="result-card not-found-msg"><strong>Error:</strong> ${error.message}</div>`;
+                } finally {
+                    loadingDiv.style.display = 'none';
+                    searchBtn.disabled = false;
+                    searchBtn.textContent = 'Find Filing';
+                }
+            });
+
+            function renderResults(results) {
+                if (!results || results.length === 0) {
+                    resultsContainer.innerHTML = `<div class="result-card not-found-msg">No results found.</div>`;
+                    return;
+                }
+
+                results.forEach(company => {
+                    let filingsHtml = '';
+                    company.filings.forEach(filing => {
+                        const dataHtml = Object.entries(filing.data).map(([key, val]) => {
+                            const valClass = val.includes('N/A') ? 'val-err' : 'val-ok';
+                            return `<p><span class="key">${key}:</span> <span class="${valClass}">${val}</span></p>`;
+                        }).join('');
+
+                        filingsHtml += `
+                            <div class="filing-item">
+                                <p><strong>Targets:</strong> ${filing.targetDates.join(', ')} | ${filing.message}</p>
+                                <p><a href="${filing.url}" target="_blank" rel="noopener noreferrer">${filing.url}</a></p>
+                                ${dataHtml ? `<div class="data-results">${dataHtml}</div>` : ''}
+                            </div>
+                        `;
+                    });
+
+                    let notFoundHtml = '';
+                    company.notFound.forEach(item => {
+                        notFoundHtml += `<div class="not-found-msg"><strong>Target ${item.targetDate}:</strong> ${item.message}</div>`;
+                    });
+
+                    const cardHtml = `
+                        <div class="result-card">
+                            <div class="result-card-header">${company.displayName}</div>
+                            ${notFoundHtml}
+                            ${filingsHtml}
+                        </div>
+                    `;
+                    resultsContainer.innerHTML += cardHtml;
+                });
+            }
+        });
+    </script>
+</body>
+</html>

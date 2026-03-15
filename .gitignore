@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environments
+.venv/
+venv/
+env/
+
+# SECRETS - This hides your email/name from GitHub!
+.env
+
+# Flask/OS junk
+instance/
+.DS_Store
+Thumbs.db
